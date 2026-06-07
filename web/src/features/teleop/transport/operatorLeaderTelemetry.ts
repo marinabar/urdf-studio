@@ -442,6 +442,8 @@ export const buildOperatorLeaderTelemetryTargetReleaseRequest = (
   calibrationGroup: target.calibrationGroup,
 });
 
+import { applySo101ToCraneMapping } from "@/features/teleop/transport/so101ToCrane";
+
 export const buildMappedOperatorLeaderTelemetry = ({
   state,
   sourceId,
@@ -483,6 +485,20 @@ export const buildMappedOperatorLeaderTelemetry = ({
           (jointName) => [jointName, state.joints[jointName]] as const,
         )
       : sortLeaderStateEntries(state);
+
+  const craneMapping = applySo101ToCraneMapping(
+    state,
+    leaderEntries,
+    targetJointNames,
+    sourceId,
+    sourceLabel,
+    sourceMotorIds,
+    buildTelemetrySample
+  );
+  if (craneMapping) {
+    return craneMapping;
+  }
+
   return Object.fromEntries(
     targetJointNames.flatMap((targetJointName, index) => {
       const telemetry = leaderEntries[index]?.[1];
