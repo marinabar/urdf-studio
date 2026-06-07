@@ -204,10 +204,10 @@
         }
       },
       {
-        "id": "evergreen-container-ship",
+        "id": "evergreen-container",
         "name": "Evergreen container ship",
-        "uri": "/world-layouts/hk-cargo-port/elements/evergreen-container-ship/0-evergreen-container-ship.glb",
-        "metadata": "/world-layouts/hk-cargo-port/elements/evergreen-container-ship/object.json",
+        "uri": "/world-layouts/hk-cargo-port/elements/evergreen-container/0-evergreen-container.glb",
+        "metadata": "/world-layouts/hk-cargo-port/elements/evergreen-container/object.json",
         "position_xyz": [-0.65, 2.45, 0.0],
         "scale": 0.5,
         "physics": {

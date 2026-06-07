@@ -1,27 +1,32 @@
 {
   "schema_version": 1,
-  "world": "port-simple",
+  "world": "hk-port3",
   "object": {
-    "id": "cargo-ship",
-    "name": "general cargo ship",
-    "description": "Mid-size general cargo vessel with white hull, white superstructure at the stern, cargo cranes on deck, and blue funnel markings. Docked at the berth.",
-    "estimated_size_m": { "height": 35, "width": 25, "length": 150 },
-    "estimated_mass_kg": 20000000,
+    "id": "container-ship",
+    "name": "container ship",
+    "description": "Large ocean-going container ship with a dark hull, visible superstructure and bridge tower at the stern, and multiple rows of stacked ISO shipping containers in red, blue, green, and orange on the deck. The ship is moored at a port dock.",
+    "estimated_size_m": {
+      "height": 50,
+      "width": 45,
+      "length": 300
+    },
+    "estimated_mass_kg": 100000000,
     "materials": [
       "painted steel hull",
-      "painted steel superstructure"
+      "ISO shipping containers",
+      "metal superstructure"
     ],
     "source_images": [
-      "worlds/hk-port/source/1-gemini-generated-image-y8pnefy8pnefy8pn-plate.png"
+      "worlds/hk-port3/source/0-bridge-crane.webp"
     ],
     "evidence": [
       {
-        "image": "worlds/hk-port/source/1-gemini-generated-image-y8pnefy8pnefy8pn-plate.png",
-        "location_in_image": "center, white hull vessel docked beside the Evergreen ship"
+        "image": "worlds/hk-port3/source/0-bridge-crane.webp",
+        "location_in_image": "right side of image, large vessel moored at the dock with containers stacked on deck"
       }
     ],
     "generate_as_3d_object": true,
-    "working_dir": "worlds/port-simple/output/cargo-ship"
+    "working_dir": "worlds/hk-port3/output/container-ship"
   },
-  "updated_at": "2026-06-06T14:56:00.209Z"
+  "updated_at": "2026-06-07T04:52:20.813Z"
 }
