@@ -65,6 +65,7 @@ export const IK_DRAG_LIVE_PHYSICS_STEP_MS = 5;
 export const IK_DRAG_LIVE_PHYSICS_THROTTLE_MS = 25;
 export const IK_DRAG_LIVE_PHYSICS_START_GRIPPER_OPENING_M = 0.09;
 export const IK_DRAG_LIVE_PHYSICS_GRIPPER_OPENING_M = 0.035;
+export const IK_DRAG_LIVE_PHYSICS_MIN_GRIPPER_Z_M = 0.045;
 
 const LIVE_PHYSICS_OBJECT_TYPES = new Set<CreatedObject["type"]>([
   "cube",
@@ -218,7 +219,11 @@ export const buildIkDragLivePhysicsSample = (
 ): OperatorTeleopMjlabEndEffectorSample => ({
   sampleIndex,
   timestampMs: Math.max(0, pose.timestampMs),
-  positionXyz: pose.positionXyz,
+  positionXyz: [
+    pose.positionXyz[0],
+    pose.positionXyz[1],
+    Math.max(pose.positionXyz[2], IK_DRAG_LIVE_PHYSICS_MIN_GRIPPER_Z_M),
+  ],
   quatWxyz: pose.quatWxyz,
   gripperOpeningM: Math.max(0, pose.gripperOpeningM ?? gripperOpeningM),
 });

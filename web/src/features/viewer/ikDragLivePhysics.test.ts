@@ -5,6 +5,7 @@ import type { CreatedObject } from "@/features/objects";
 import {
   IK_DRAG_LIVE_PHYSICS_FRAME_MAP,
   IK_DRAG_LIVE_PHYSICS_GRIPPER_OPENING_M,
+  IK_DRAG_LIVE_PHYSICS_MIN_GRIPPER_Z_M,
   IK_DRAG_LIVE_PHYSICS_START_GRIPPER_OPENING_M,
   buildIkDragLivePhysicsSample,
   buildIkDragLivePhysicsWorldLayout,
@@ -161,5 +162,19 @@ describe("ikDragLivePhysics", () => {
         IK_DRAG_LIVE_PHYSICS_START_GRIPPER_OPENING_M
       ).gripperOpeningM
     ).toBe(IK_DRAG_LIVE_PHYSICS_START_GRIPPER_OPENING_M);
+  });
+
+  it("keeps the commanded gripper proxy above the MuJoCo floor", () => {
+    const sample = buildIkDragLivePhysicsSample(
+      {
+        endEffectorLink: "gripper",
+        positionXyz: [0.1, 0.2, -0.3],
+        quatWxyz: [1, 0, 0, 0],
+        timestampMs: 10,
+      },
+      1
+    );
+
+    expect(sample.positionXyz[2]).toBe(IK_DRAG_LIVE_PHYSICS_MIN_GRIPPER_Z_M);
   });
 });

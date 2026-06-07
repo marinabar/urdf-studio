@@ -6,11 +6,42 @@ import { createServer } from "vite";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
-const iLoveUrdfNodeDomRuntimeUrl = pathToFileURL(
-  path.resolve(repoRoot, "..", "i-love-urdf", "dist", "node", "nodeDomRuntime.js")
-).href;
 
-const { installNodeDomGlobals } = await import(iLoveUrdfNodeDomRuntimeUrl);
+class NodeFileReader {
+  result = null;
+  error = null;
+  onerror = null;
+  onload = null;
+
+  async readAsDataURL(blob) {
+    try {
+      const bytes = Buffer.from(await blob.arrayBuffer());
+      const mimeType = typeof blob.type === "string" ? blob.type : "";
+      this.result = `data:${mimeType};base64,${bytes.toString("base64")}`;
+      this.onload?.({ target: this });
+    } catch (error) {
+      this.error = error;
+      this.onerror?.({ target: this });
+    }
+  }
+}
+
+const installNodeDomGlobals = () => {
+  globalThis.FileReader ??= NodeFileReader;
+};
+
+const installIluNodeDomGlobals = async () => {
+  const runtimePath = path.resolve(
+    repoRoot,
+    "node_modules",
+    "i-love-urdf",
+    "dist",
+    "node",
+    "nodeDomRuntime.js"
+  );
+  const runtime = await import(pathToFileURL(runtimePath).href);
+  runtime.installNodeDomGlobals();
+};
 
 const readStdin = async () =>
   await new Promise((resolve, reject) => {
@@ -38,6 +69,7 @@ const decodeMeshFiles = (meshFiles) => {
 };
 
 const payload = JSON.parse(await readStdin());
+await installIluNodeDomGlobals();
 installNodeDomGlobals();
 
 const viteServer = await createServer({
@@ -45,6 +77,11 @@ const viteServer = await createServer({
   mode: "test",
   logLevel: "error",
   appType: "custom",
+  optimizeDeps: {
+    include: ["i-love-urdf"],
+    noDiscovery: true,
+    holdUntilCrawlEnd: false,
+  },
   server: {
     middlewareMode: true,
   },

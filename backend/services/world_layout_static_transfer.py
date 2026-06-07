@@ -5,9 +5,11 @@ import math
 import re
 import tempfile
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Sequence
 from xml.etree import ElementTree as ET
+from urllib.parse import unquote
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -23,6 +25,10 @@ DEFAULT_RGBA = (0.231372549, 0.509803922, 0.964705882, 1.0)
 POSITION_TOLERANCE_M = 1e-6
 SIZE_TOLERANCE_M = 1e-6
 QUATERNION_TOLERANCE = 1e-6
+WORLD_LAYOUT_ELEMENT_SCALE = 0.5
+WORLD_LAYOUT_ELEMENT_MIN_METRIC_SCALE = 0.02
+WORLD_LAYOUT_ELEMENT_MAX_METRIC_SCALE = 200
+WORLD_LAYOUT_PUBLIC_ROOT = Path(__file__).resolve().parents[2] / "web" / "public"
 
 STUDIO_Y_UP_TO_Z_UP = np.array(
     [
@@ -98,6 +104,11 @@ class LoadedPrimitive:
     quat_wxyz: tuple[float, float, float, float] | None
     size_xyz: tuple[float, float, float] | None
     collision: bool | None
+
+
+@dataclass(frozen=True)
+class WorldLayoutElementBounds:
+    size_xyz: tuple[float, float, float]
 
 
 def _is_record(value: Any) -> bool:
@@ -214,6 +225,196 @@ def _read_world_object(value: Any, index: int) -> WorldLayoutObject:
     )
 
 
+def _read_non_empty_string(value: Any, fallback: str = "") -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else fallback
+
+
+def _read_scale_vector(value: Any, scalar_value: Any, field: str) -> tuple[float, float, float]:
+    if value is not None:
+        return _read_vector3(value, field, positive=True)
+    scalar = _read_finite_number(scalar_value, field) if scalar_value is not None else 1.0
+    if scalar <= 0:
+        raise WorldLayoutTransferError(f"{field} must be > 0")
+    return (scalar, scalar, scalar)
+
+
+def _resolve_world_layout_public_path(uri: str) -> Path | None:
+    normalized = uri.strip()
+    if not normalized:
+        return None
+    if normalized.startswith(("http://", "https://", "data:", "blob:")):
+        return None
+    if normalized.startswith("file://"):
+        candidate = Path(unquote(normalized.removeprefix("file://"))).resolve()
+    else:
+        relative = unquote(normalized.split("?", 1)[0].split("#", 1)[0]).lstrip("/")
+        if not relative:
+            return None
+        candidate = (WORLD_LAYOUT_PUBLIC_ROOT / relative).resolve()
+    try:
+        candidate.relative_to(WORLD_LAYOUT_PUBLIC_ROOT)
+    except ValueError as exc:
+        raise WorldLayoutTransferError(f"environment.elements uri escapes public root: {uri}") from exc
+    return candidate
+
+
+def _read_glb_json_chunk(path: Path) -> dict[str, Any]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise WorldLayoutTransferError(f"Failed to read world-layout element mesh: {path}") from exc
+    if len(raw) < 20 or raw[:4] != b"glTF":
+        raise WorldLayoutTransferError(f"World-layout element mesh is not a GLB: {path}")
+    offset = 12
+    while offset + 8 <= len(raw):
+        chunk_length = int.from_bytes(raw[offset : offset + 4], "little")
+        chunk_type = raw[offset + 4 : offset + 8]
+        chunk_start = offset + 8
+        chunk_end = chunk_start + chunk_length
+        if chunk_end > len(raw):
+            break
+        if chunk_type == b"JSON":
+            try:
+                return json.loads(raw[chunk_start:chunk_end].decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                raise WorldLayoutTransferError(f"Invalid GLB JSON chunk: {path}") from exc
+        offset = chunk_end
+    raise WorldLayoutTransferError(f"World-layout element GLB has no JSON chunk: {path}")
+
+
+@lru_cache(maxsize=128)
+def _read_glb_position_bounds(path: Path) -> WorldLayoutElementBounds:
+    gltf = _read_glb_json_chunk(path)
+    accessors = gltf.get("accessors")
+    meshes = gltf.get("meshes")
+    if not isinstance(accessors, list) or not isinstance(meshes, list):
+        raise WorldLayoutTransferError(f"World-layout element GLB has no mesh accessors: {path}")
+    mins = [math.inf, math.inf, math.inf]
+    maxs = [-math.inf, -math.inf, -math.inf]
+    found_position = False
+    for mesh in meshes:
+        if not _is_record(mesh):
+            continue
+        primitives = mesh.get("primitives")
+        if not isinstance(primitives, list):
+            continue
+        for primitive in primitives:
+            if not _is_record(primitive):
+                continue
+            attributes = primitive.get("attributes")
+            if not _is_record(attributes):
+                continue
+            accessor_index = attributes.get("POSITION")
+            if not isinstance(accessor_index, int) or accessor_index < 0 or accessor_index >= len(accessors):
+                continue
+            accessor = accessors[accessor_index]
+            if (
+                not _is_record(accessor)
+                or not isinstance(accessor.get("min"), list)
+                or not isinstance(accessor.get("max"), list)
+            ):
+                continue
+            accessor_min = _read_vector3(accessor["min"], f"{path}.accessors[{accessor_index}].min")
+            accessor_max = _read_vector3(accessor["max"], f"{path}.accessors[{accessor_index}].max")
+            for axis in range(3):
+                mins[axis] = min(mins[axis], accessor_min[axis])
+                maxs[axis] = max(maxs[axis], accessor_max[axis])
+            found_position = True
+    if not found_position:
+        raise WorldLayoutTransferError(f"World-layout element GLB has no POSITION bounds: {path}")
+    size = tuple(float(maxs[axis] - mins[axis]) for axis in range(3))
+    if any(component <= 0 for component in size):
+        raise WorldLayoutTransferError(f"World-layout element GLB has invalid POSITION bounds: {path}")
+    return WorldLayoutElementBounds(size_xyz=(size[0], size[1], size[2]))
+
+
+def _resolve_element_bounds(entry: dict[str, Any], index: int) -> WorldLayoutElementBounds:
+    proxy = entry.get("collision_proxy")
+    if _is_record(proxy):
+        size = _read_vector3(proxy.get("size_xyz"), f"environment.elements[{index}].collision_proxy.size_xyz", positive=True)
+        return WorldLayoutElementBounds(size_xyz=size)
+    uri = _read_non_empty_string(entry.get("uri"))
+    mesh_path = _resolve_world_layout_public_path(uri)
+    if mesh_path is None:
+        raise WorldLayoutTransferError(
+            f"environment.elements[{index}] needs collision_proxy.size_xyz for non-local mesh uri: {uri or '<missing>'}"
+        )
+    return _read_glb_position_bounds(mesh_path)
+
+
+def _read_environment_element_object(value: Any, index: int) -> WorldLayoutObject:
+    if not _is_record(value):
+        raise WorldLayoutTransferError(f"environment.elements[{index}] must be an object")
+    raw_id = value.get("id")
+    if not isinstance(raw_id, str) or not raw_id.strip():
+        raise WorldLayoutTransferError(f"environment.elements[{index}].id must be a non-empty string")
+    element_id = raw_id.strip()
+    raw_name = value.get("name")
+    position = _read_vector3(value.get("position_xyz"), f"environment.elements[{index}].position_xyz")
+    rotation = (
+        _read_vector3(value.get("rotation_rpy_rad"), f"environment.elements[{index}].rotation_rpy_rad")
+        if "rotation_rpy_rad" in value
+        else (0.0, 0.0, 0.0)
+    )
+    scale = _read_scale_vector(
+        value.get("scale_xyz"),
+        value.get("scale", 1.0),
+        f"environment.elements[{index}].scale",
+    )
+    bounds = _resolve_element_bounds(value, index)
+    real_world_height_m = _read_optional_positive_number(
+        value.get("real_world_height_m"),
+        f"environment.elements[{index}].real_world_height_m",
+    )
+    metric_scale = WORLD_LAYOUT_ELEMENT_SCALE
+    if real_world_height_m is not None and bounds.size_xyz[1] > 0:
+        metric_scale = min(
+            WORLD_LAYOUT_ELEMENT_MAX_METRIC_SCALE,
+            max(WORLD_LAYOUT_ELEMENT_MIN_METRIC_SCALE, real_world_height_m / bounds.size_xyz[1]),
+        )
+    size = tuple(bounds.size_xyz[axis] * metric_scale * scale[axis] for axis in range(3))
+    local_center = np.array((0.0, size[1] * 0.5, 0.0), dtype=float)
+    rotation_matrix = Rotation.from_euler("xyz", rotation).as_matrix()
+    center = tuple(float(component) for component in (np.array(position, dtype=float) + rotation_matrix @ local_center))
+    raw_color = value.get("material_color", value.get("color"))
+    return WorldLayoutObject(
+        id=element_id,
+        name=raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else element_id,
+        primitive_type="cube",
+        position_xyz=center,
+        rotation_rpy_rad=rotation,
+        size_xyz=(size[0], size[1], size[2]),
+        color=raw_color.strip() if isinstance(raw_color, str) and raw_color.strip() else "#3b82f6",
+        is_hidden=value.get("is_hidden") is True,
+        physics=_read_world_object_physics(value.get("physics"), index),
+    )
+
+
+def _read_environment_layout_objects(payload: dict[str, Any]) -> tuple[WorldLayoutObject, ...] | None:
+    environment = payload.get("environment")
+    if not _is_record(environment):
+        return None
+    raw_elements = environment.get("elements")
+    if not isinstance(raw_elements, list):
+        return None
+    physics_elements = [
+        (item, index)
+        for index, item in enumerate(raw_elements)
+        if _is_record(item)
+        and (
+            _is_record(item.get("collision_proxy"))
+            or (
+                _is_record(item.get("physics"))
+                and item["physics"].get("body_type") == "dynamic"
+            )
+        )
+    ]
+    return tuple(
+        _read_environment_element_object(item, index)
+        for item, index in physics_elements
+    )
+
+
 def _read_snapshot_from_payload(payload: Any) -> tuple[dict[str, Any], str, str]:
     if not _is_record(payload):
         raise WorldLayoutTransferError("World layout payload must be a JSON object")
@@ -236,7 +437,13 @@ def parse_static_world_layout_payload(payload: Any) -> StaticWorldLayout:
     if not isinstance(raw_objects, list):
         raise WorldLayoutTransferError("World layout objects must be an array")
     scenario_time_ms, scenario_duration_ms = _read_static_timing(snapshot)
-    objects = tuple(_read_world_object(item, index) for index, item in enumerate(raw_objects))
+    if raw_objects:
+        objects = tuple(_read_world_object(item, index) for index, item in enumerate(raw_objects))
+    else:
+        environment_objects = _read_environment_layout_objects(payload) if _is_record(payload) else None
+        objects = environment_objects if environment_objects is not None else ()
+        if environment_objects is not None:
+            source_kind = "environment.elements"
     return StaticWorldLayout(
         name=name.strip() or "static-world-layout",
         objects=objects,

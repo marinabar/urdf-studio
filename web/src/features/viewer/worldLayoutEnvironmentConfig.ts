@@ -17,8 +17,13 @@ export type WorldLayoutElementConfig = {
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
+  collisionProxy?: WorldLayoutElementCollisionProxyConfig;
   materialColor?: string;
   physics?: WorldLayoutElementPhysicsConfig;
+};
+
+export type WorldLayoutElementCollisionProxyConfig = {
+  sizeXyz: [number, number, number];
 };
 
 export type WorldLayoutElementPhysicsConfig = {
@@ -95,6 +100,17 @@ const readWorldLayoutElementPhysicsConfig = (
   };
 };
 
+const readWorldLayoutElementCollisionProxyConfig = (
+  value: unknown
+): WorldLayoutElementCollisionProxyConfig | undefined => {
+  if (!isRecord(value)) return undefined;
+  const sizeXyz = readVector3(value.size_xyz, [Number.NaN, Number.NaN, Number.NaN]);
+  if (!sizeXyz.every((component) => Number.isFinite(component) && component > 0)) {
+    return undefined;
+  }
+  return { sizeXyz };
+};
+
 export const readWorldLayoutSplatConfig = (
   environment: Record<string, unknown> | null
 ): WorldLayoutSplatConfig | null => {
@@ -161,6 +177,9 @@ export const readWorldLayoutElementConfigs = (
       ? readVector3(entry.rotation_rpy_rad, [0, 0, 0])
       : null;
     const physics = readWorldLayoutElementPhysicsConfig(entry.physics, physicsDefaults);
+    const collisionProxy = readWorldLayoutElementCollisionProxyConfig(
+      entry.collision_proxy
+    );
     return [{
       asset,
       position: explicitPosition ?? mapSimuGenYUpPositionToStudioXyFloor(placement.position),
@@ -169,6 +188,7 @@ export const readWorldLayoutElementConfigs = (
         entry.scale_xyz !== undefined || entry.scale !== undefined
           ? readScaleVector(entry.scale_xyz, entry.scale)
           : placement.scale,
+      ...(collisionProxy ? { collisionProxy } : {}),
       ...(readNonEmptyString(entry.material_color ?? entry.color)
         ? { materialColor: readNonEmptyString(entry.material_color ?? entry.color) }
         : {}),

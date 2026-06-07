@@ -122,6 +122,68 @@ def test_dynamic_layout_object_exports_as_free_mujoco_body() -> None:
     assert geom.get("solref") == "0.02 1"
 
 
+def test_empty_world_layout_objects_falls_back_to_environment_elements() -> None:
+    payload = {
+        "world_layout": {
+            "name": "environment-colliders",
+            "objects": [],
+            "scenario_time_ms": 0,
+            "scenario_duration_ms": 0,
+        },
+        "environment": {
+            "elements": [
+                {
+                    "id": "stackable-container",
+                    "name": "Stackable container",
+                    "uri": "/world-layouts/example/container.glb",
+                    "position_xyz": [0.1, 0.2, 0.03],
+                    "rotation_rpy_rad": [0.0, 0.0, 0.25],
+                    "scale": 0.2,
+                    "collision_proxy": {"size_xyz": [1.0, 0.4, 0.5]},
+                    "material_color": "#ef4444",
+                    "physics": {
+                        "body_type": "dynamic",
+                        "mass_kg": 0.12,
+                        "friction": 3.0,
+                        "restitution": 0.0,
+                    },
+                },
+                {
+                    "id": "static-yard-container",
+                    "name": "Static yard container",
+                    "uri": "/world-layouts/example/yard.glb",
+                    "position_xyz": [-0.2, 0.4, 0.0],
+                    "rotation_rpy_rad": [1.5707963267948966, 0.0, 0.0],
+                    "scale": 0.25,
+                    "collision_proxy": {"size_xyz": [1.0, 0.4, 0.5]},
+                    "physics": {
+                        "body_type": "static",
+                        "mass_kg": 2300,
+                        "friction": 1.2,
+                        "restitution": 0.0,
+                    },
+                },
+            ],
+        },
+    }
+
+    layout = parse_static_world_layout_payload(payload)
+    primitives, warnings = build_sim_primitives(layout, frame_map="identity")
+
+    assert layout.source_kind == "environment.elements"
+    assert warnings == ()
+    assert [primitive.source_id for primitive in primitives] == [
+        "stackable-container",
+        "static-yard-container",
+    ]
+    assert primitives[0].body_type == "dynamic"
+    assert primitives[0].mass_kg == 0.12
+    assert primitives[0].collision is True
+    assert primitives[0].size_xyz == pytest.approx((0.1, 0.04, 0.05))
+    assert primitives[1].body_type == "static"
+    assert primitives[1].collision is True
+
+
 def test_mujoco_gate_fails_on_substantial_size_mismatch() -> None:
     pytest.importorskip("mujoco")
     layout = parse_static_world_layout_payload(_layout_payload())

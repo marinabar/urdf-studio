@@ -5947,15 +5947,21 @@ export const Viewer3D = ({
   });
   const leaderTeleopLivePhysicsActive =
     liveTeleopJointSyncActive && effectiveDragMode === "hardware-teleop";
+  const hasDynamicWorldLayoutPhysicsProxy = worldLayoutElementPhysicsProxies.some(
+    (proxy) => (proxy.physics?.bodyType ?? "dynamic") === "dynamic"
+  );
+  const robotActionLivePhysicsActive =
+    hasDynamicWorldLayoutPhysicsProxy &&
+    (leaderTeleopLivePhysicsActive || isDraggingJoint || isIkTrajectoryApplying || isFollowingOrbit);
   useEffect(() => {
-    if (!leaderTeleopLivePhysicsActive) return;
+    if (!robotActionLivePhysicsActive) return;
     beginIkDragLivePhysics();
     return () => {
       stopIkDragLivePhysics();
     };
   }, [
     beginIkDragLivePhysics,
-    leaderTeleopLivePhysicsActive,
+    robotActionLivePhysicsActive,
     stopIkDragLivePhysics,
   ]);
   useEffect(() => {
@@ -7421,7 +7427,7 @@ export const Viewer3D = ({
           )}
 
           <LeaderTeleopLivePhysicsFrameSync
-            active={leaderTeleopLivePhysicsActive}
+            active={robotActionLivePhysicsActive}
             endEffectorLink={primaryIkEndEffectorLink}
             gripperOpeningM={livePhysicsGripperOpeningM}
             onTargetPose={handleIkDragLivePhysicsTargetPose}
